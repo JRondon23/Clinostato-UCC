@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "funciones_clinostato.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,8 +33,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-#define tamano_buffer 60
 
 /* USER CODE END PD */
 
@@ -48,14 +46,10 @@
 /* USER CODE BEGIN PV */
 uint32_t t_ventana_1[2];
 uint32_t t_ventana_2[2];
-uint8_t flag_ready1 = 0;
-uint8_t flag_ready2 = 0;
+uint8_t flag_sensado_m1 = 0;
+uint8_t flag_sensado_m2 = 0;
 uint32_t tiempo1 = 0;
-uint32_t buffer[tamano_buffer]; //Buffer donde almacenamos las muestras
-uint8_t indice = 0;
-uint32_t acumulador = 0;
-float promedio = 0;
-float rpm1 = 0; //resultado con filtro puesto
+float rpm1 = 0, rpm2 = 0; //resultado con filtro puesto
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,7 +80,6 @@ int main(void) {
 
 	/* USER CODE BEGIN Init */
 
-
 	/* USER CODE END Init */
 
 	/* Configure the system clock */
@@ -109,32 +102,16 @@ int main(void) {
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 	while (1) {
+		if (flag_sensado_m1 == 1) {
+			rpm1 = Calcular_RPM(Filtro_Promedio(t_ventana_1, 1));
+		}
+		if (flag_sensado_m2) {
+			rpm2 = Calcular_RPM((Filtro_Promedio(t_ventana_2, 2)));
+		}
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
 
-		if (flag_ready1 == 1) {
-
-			/*
-			 *
-			 * 	Filtro promedio con un shift register
-			 *
-			 */
-
-			buffer[indice] = (t_ventana_1[1] - t_ventana_1[0]); //por 2 para trabajar en ms
-			indice = (indice + 1) % tamano_buffer; //para mover el indcie de 0 a 4
-			for (int i = 0; i < tamano_buffer; ++i) {
-
-				acumulador += buffer[i];
-
-			}
-			promedio = acumulador/tamano_buffer;
-
-			rpm1 = 1000.0f/ promedio;
-			acumulador = 0;
-			flag_ready1 = 0;
-
-		}
 	}
 	/* USER CODE END 3 */
 }
@@ -186,7 +163,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 			t_ventana_1[flag_ventana1] = HAL_TIM_ReadCapturedValue(htim,
 			TIM_CHANNEL_1);
 			if (flag_ventana1) {
-				flag_ready1 = 1;
+				flag_sensado_m1 = 1;
 			}
 			flag_ventana1 = (flag_ventana1 + 1) % 2;
 
@@ -194,7 +171,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 			t_ventana_2[flag_ventana2] = HAL_TIM_ReadCapturedValue(htim,
 			TIM_CHANNEL_2);
 			if (flag_ventana2) {
-				flag_ready2 = 1;
+				flag_sensado_m2 = 1;
 			}
 			flag_ventana2 = (flag_ventana2 + 1) % 2;
 			;
