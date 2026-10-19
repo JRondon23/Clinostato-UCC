@@ -44,12 +44,12 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint32_t t_ventana_1[2];
-uint32_t t_ventana_2[2];
+uint32_t primera_captura_1 = 1, captura_anterior_1 = 0, delta_m1 = 0;
+uint32_t primera_captura_2 = 1, captura_anterior_2 = 0, delta_m2 = 0;
+
 uint8_t flag_sensado_m1 = 0;
 uint8_t flag_sensado_m2 = 0;
-uint32_t tiempo1 = 0;
-float rpm1 = 0, rpm2 = 0; //resultado con filtro puesto
+int32_t rpm1 = 0, rpm2 = 0; //resultado con filtro puesto
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -94,20 +94,27 @@ int main(void) {
 	MX_TIM2_Init();
 	MX_TIM3_Init();
 	/* USER CODE BEGIN 2 */
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_Base_Start_IT(&htim2);
 	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 50);
 
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 	while (1) {
+		HAL_GPIO_WritePin(M1_P1_GPIO_Port, M1_P1_Pin, 1);
+		HAL_GPIO_WritePin(M1_P2_GPIO_Port, M1_P2_Pin, 0);
 		if (flag_sensado_m1 == 1) {
-			rpm1 = Calcular_RPM(Filtro_Promedio(t_ventana_1, 1));
+			rpm1 = flag_sensado_m1 = 0;
+
 		}
 		if (flag_sensado_m2) {
-			rpm2 = Calcular_RPM((Filtro_Promedio(t_ventana_2, 2)));
+			rpm2 = Calcular_RPM(Filtro_Promedio(delta_m2, 2));
+			flag_sensado_m2 = 0;
 		}
+
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
@@ -155,26 +162,32 @@ void SystemClock_Config(void) {
 
 /* USER CODE BEGIN 4 */
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
-	static uint8_t flag_ventana1 = 0;
-	static uint8_t flag_ventana2 = 0;
 
 	if (htim->Instance == TIM2) {
 		if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-			t_ventana_1[flag_ventana1] = HAL_TIM_ReadCapturedValue(htim,
+
+			uint32_t captura_actual_1 = HAL_TIM_ReadCapturedValue(htim,
 			TIM_CHANNEL_1);
-			if (flag_ventana1) {
-				flag_sensado_m1 = 1;
+			if (primera_captura_1) {
+				captura_anterior_1 = captura_actual_1;
+				primera_captura_1 = 0;
+				return; //sale del if si solo tengo una medicion y no puedo calcular delta
 			}
-			flag_ventana1 = (flag_ventana1 + 1) % 2;
+			delta_m1 = captura_actual_1 - captura_anterior_1;
+			captura_anterior_1 = captura_actual_1;
+			flag_sensado_m1 = 1;
 
 		} else {
-			t_ventana_2[flag_ventana2] = HAL_TIM_ReadCapturedValue(htim,
+			uint32_t captura_actual_2 = HAL_TIM_ReadCapturedValue(htim,
 			TIM_CHANNEL_2);
-			if (flag_ventana2) {
-				flag_sensado_m2 = 1;
+			if (primera_captura_2) {
+				captura_anterior_2 = captura_actual_2;
+				primera_captura_2 = 0;
+				return; //sale del if si solo tengo una medicion y no puedo calcular delta
 			}
-			flag_ventana2 = (flag_ventana2 + 1) % 2;
-			;
+			delta_m2 = captura_actual_2 - captura_anterior_2;
+			captura_anterior_2 = captura_actual_2;
+			flag_sensado_m2 = 1;
 		}
 	}
 }
