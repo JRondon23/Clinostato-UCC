@@ -10,77 +10,128 @@
 #include "stm32g4xx_hal_tim.h"
 extern TIM_HandleTypeDef htim3;
 
-int32_t Filtro_Promedio(uint32_t delta, uint8_t motor) {
-	static uint32_t motor1_buffer[BUFFER_SIZE] = { 0 },
-			motor2_buffer[BUFFER_SIZE] = { 0 };
-	static uint32_t indice_1 = 0, indice_2 = 0, flag_primera1 = 0, flag_primera2 = 0;
-	int32_t valor_m1 = 0, valor_m2 = 0;
+float Filtro_Promedio(uint32_t delta, uint8_t motor) {
+	static uint32_t buffer_m1[BUFFER_SIZE] = { 0 };
+	static uint32_t buffer_m2[BUFFER_SIZE] = { 0 };
+	static uint32_t indice_m1 = 0, indice_m2 = 0;
+	static uint32_t muestras_m1 = 0, muestras_m2 = 0;
+	static float promedio_m1 = 0.0f, promedio_m2 = 0.0f;
 
+	uint32_t *buffer;
+	uint32_t *indice;
+	uint32_t *muestras;
+	float *promedio;
+	float suma = 0.0f;
+
+	// Seleccionar el motor, se hace asi para no repetir codigo
 	if (motor == 1) {
+		buffer = buffer_m1;
+		indice = &indice_m1;
+		muestras = &muestras_m1;
+		promedio = &promedio_m1;
+	} else if (motor == 2) {
+		buffer = buffer_m2;
+		indice = &indice_m2;
+		muestras = &muestras_m2;
+		promedio = &promedio_m2;
+	} else {
+		return 0.0f;
+	}
 
-		motor1_buffer[indice_1] = delta;
-		indice_1 = (indice_1 + 1) % BUFFER_SIZE;
-		if (flag_primera1 < 60) {
-			flag_primera1++;
-			return 40404;
-		}
-		for (int i = 0; i < BUFFER_SIZE; ++i) {
-			valor_m1 += motor1_buffer[i];
-		}
-		return valor_m1 / BUFFER_SIZE; // se multiplica por 100 para tener 2 cifras despues de la coma
+	if (delta == 0) {
+		return *promedio;
 	}
-	if (motor == 2) {
-		motor2_buffer[indice_2] = delta;
-		indice_2 = (indice_2 + 1) % BUFFER_SIZE;
-		if (flag_primera2 < 60) {
-			flag_primera2++;
-			return 40404;
-		}
-		for (int i = 0; i < BUFFER_SIZE; ++i) {
-			valor_m2 += motor2_buffer[i];
-		}
-		return valor_m2 / BUFFER_SIZE;
+
+	// Almacenar la nueva medición
+	buffer[*indice] = delta;
+
+	// Actualizar índice circular
+	*indice = (*indice + 1) % BUFFER_SIZE;
+
+	// Contar muestras hasta completar el buffer
+	if (*muestras < BUFFER_SIZE) {
+		(*muestras)++;
 	}
-	return 40404;
+
+	// Calcular promedio utilizando las muestras disponibles
+	for (uint32_t i = 0; i < *muestras; i++) {
+		suma += buffer[i];
+	}
+	*promedio = suma / (float) (*muestras);
+	return *promedio;
 }
 
-int32_t Calcular_RPM(int32_t valor) {
-	if(valor == 0){
-		return 0;
+float Calcular_RPM(float tiempo) {
+	if (tiempo <= 0.0f) {
+		return 0.0f;
 	}
-	return (1000 / valor);
+	return (60.0f * 500) / (PULSOS_POR_VUELTA * tiempo);
+}
+
+void Mover_Motor(float duty_porcentaje, uint8_t motor, uint32_t *ccr_actual) {
+
+	uint32_t canal;
+	if (motor == 1) {
+		canal = TIM_CHANNEL_1;
+	} else if (motor == 2) {
+		canal = TIM_CHANNEL_2;
+	} else {
+		return;
+	}
+
+	if (duty_porcentaje < 0.0f) {
+		duty_porcentaje = 0.0f;
+	} else if (duty_porcentaje > 100.0f) {
+		duty_porcentaje = 100.0f;
+	}
+
+	uint32_t ccr = (uint32_t) ((duty_porcentaje * (float) MAX_PWM / 100.0f)+ 0.5f);
+	*ccr_actual = ccr;
+	__HAL_TIM_SET_COMPARE(&htim3, canal, ccr);
 
 }
 
-void Mover_Motor(int32_t rpm, uint8_t motor) {
-	uint32_t valor_rcc = rpm;
-	if (motor == 1) {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint32_t )rpm);
-	}
-	if (motor == 2) {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, (uint32_t )rpm);
-	}
-}
+void PID(uint8_t motor, float set_point, float rpm, float *salida_debug,
+		uint32_t *ccr_actual) {
 
-void PID(uint8_t motor, int32_t set_point, int32_t rpm) {
-	static int32_t error_proporcional_1 = 0, ep_2 = 0, error_integrador_1 = 0,
-			ei_2 = 0, error_1 = 0, error_2 = 0;
-	static uint32_t kp = 1, ki = 1, kd = 1;
-	uint32_t arr_maximo = 99;
+	// integral motor 1
+	static float integral_m1 = 0.0f;
+
+	//integral motor 2
+	static float integral_m2 = 0.0f;
+
+	//puntero integral que cambia
+	float *integral;
 
 	if (motor == 1) {
-		error_proporcional_1 = (set_point - rpm) * kp;
-		error_integrador_1 += (set_point - rpm) * ki;
-		error_1 = error_proporcional_1 + error_integrador_1;
-		rpm = rpm + error_1;
-
-		if (rpm < 0) {
-			rpm = 0;
-		} else if (rpm >> arr_maximo) {
-			rpm = arr_maximo;
-		}
-		Mover_Motor(rpm, motor);
+		integral = &integral_m1;
+	} else if (motor == 2) {
+		integral = &integral_m2;
+	} else {
+		return;
 	}
+	float error = set_point - rpm;
+
+	float integral_aux = *integral + (error * TIEMPO_PID);
+	float salida = PID_KP * error + PID_KI * integral_aux;
+
+	if (!((salida > 100.0f && error > 0.0f) || (salida < 0.0f && error < 0.0f))) {
+
+		*integral = integral_aux;
+	}
+
+	salida = PID_KP * error + PID_KI * (*integral);
+
+	if (salida > 100.0f) {
+		salida = 100.0f;
+	}
+	if (salida < 0.0f) {
+		salida = 0.0f;
+	}
+
+	*salida_debug = salida;
+
+	Mover_Motor(salida, motor, ccr_actual);
 }
 /*
  void Motor_Init(motor_typedef motor, uint8_t num_m,
