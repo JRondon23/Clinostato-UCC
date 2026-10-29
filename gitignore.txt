@@ -1,0 +1,26 @@
+# Build outputs (CubeIDE / STM32CubeIDE)
+Debug/
+Release/
+build/
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.su
+
+# Eclipse / CubeIDE project metadata (regenerable, pero rompe rutas si otro clona)
+.metadata/
+.settings/
+.cproject
+.project
+
+# CubeMX backup files
+*.ioc.bak
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp

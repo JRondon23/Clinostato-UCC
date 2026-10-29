@@ -1,0 +1,4 @@
+../Core/Src/funciones_clinostato.c:13:7:Filtro_Promedio	6
+../Core/Src/funciones_clinostato.c:64:7:Calcular_RPM	2
+../Core/Src/funciones_clinostato.c:71:6:Mover_Motor	10
+../Core/Src/funciones_clinostato.c:94:6:PID	9

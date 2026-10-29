@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "funciones_clinostato.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,8 +33,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-#define tamano_buffer 60
 
 /* USER CODE END PD */
 
@@ -46,16 +44,28 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint32_t t_ventana_1[2];
-uint32_t t_ventana_2[2];
-uint8_t flag_ready1 = 0;
-uint8_t flag_ready2 = 0;
-uint32_t tiempo1 = 0;
-uint32_t buffer[tamano_buffer]; //Buffer donde almacenamos las muestras
-uint8_t indice = 0;
-uint32_t acumulador = 0;
-float promedio = 0;
-float rpm1 = 0; //resultado con filtro puesto
+//Captura de velocidad
+volatile uint32_t primera_captura_1 = 1, captura_anterior_1 = 0, delta_m1 = 0;
+volatile uint32_t primera_captura_2 = 1, captura_anterior_2 = 0, delta_m2 = 0;
+volatile uint8_t hay_captura = 0;
+volatile uint8_t flag_sensado_m1 = 0;
+volatile uint8_t flag_sensado_m2 = 0;
+volatile float rpm1 = 0.0f, rpm2 = 0.0f;
+volatile uint32_t motor_detenido = 0;
+uint32_t delta_local = 0;
+
+//Motor Parado
+uint32_t tiempo_parado = 0, llego_pulso = 0;
+
+//variables temp para debuguear
+float salida_pid = 0.0f;
+uint32_t ccr_actual = 0;
+float set_point = 18.0f;
+
+//temp para debuggerar 2
+uint32_t tiempo_pid = 0, tiempo_inicial = 0;
+uint8_t flag_pid_listo = 1;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -82,10 +92,9 @@ int main(void) {
 	/* MCU Configuration--------------------------------------------------------*/
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-	HAL_Init();
+ 	HAL_Init();
 
 	/* USER CODE BEGIN Init */
-
 
 	/* USER CODE END Init */
 
@@ -100,40 +109,43 @@ int main(void) {
 	MX_GPIO_Init();
 	MX_TIM2_Init();
 	MX_TIM3_Init();
+	MX_TIM4_Init();
 	/* USER CODE BEGIN 2 */
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_Base_Start_IT(&htim2);
 	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, ccr_actual);
+	HAL_TIM_Base_Start_IT(&htim4);
 
+	HAL_GPIO_WritePin(M1_P1_GPIO_Port, M1_P1_Pin, 1);
+	HAL_GPIO_WritePin(M1_P2_GPIO_Port, M1_P2_Pin, 0);
+	tiempo_inicial = HAL_GetTick();
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 	while (1) {
+
+		// Medición habitual del motor 1
+		if (flag_sensado_m1 == 1) {
+			delta_local = delta_m1;
+			rpm1 = Calcular_RPM(Filtro_Promedio(delta_local, 1));
+			flag_sensado_m1 = 0;
+		}
+
+		// Medición habitual del motor 2
+		if (flag_sensado_m2) {
+			delta_local = delta_m2;
+			rpm2 = Calcular_RPM(Filtro_Promedio(delta_local, 2));
+			flag_sensado_m2 = 0;
+		}
+
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-
-		if (flag_ready1 == 1) {
-
-			/*
-			 *
-			 * 	Filtro promedio con un shift register
-			 *
-			 */
-
-			buffer[indice] = (t_ventana_1[1] - t_ventana_1[0]); //por 2 para trabajar en ms
-			indice = (indice + 1) % tamano_buffer; //para mover el indcie de 0 a 4
-			for (int i = 0; i < tamano_buffer; ++i) {
-
-				acumulador += buffer[i];
-
-			}
-			promedio = acumulador/tamano_buffer;
-
-			rpm1 = 1000.0f/ promedio;
-			acumulador = 0;
-			flag_ready1 = 0;
-
+		if ((set_point - rpm1) < 0.001f && flag_pid_listo) {
+			tiempo_pid = HAL_GetTick() - tiempo_inicial;
+			flag_pid_listo = 0;
 		}
 	}
 	/* USER CODE END 3 */
@@ -178,29 +190,54 @@ void SystemClock_Config(void) {
 
 /* USER CODE BEGIN 4 */
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
-	static uint8_t flag_ventana1 = 0;
-	static uint8_t flag_ventana2 = 0;
 
 	if (htim->Instance == TIM2) {
 		if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-			t_ventana_1[flag_ventana1] = HAL_TIM_ReadCapturedValue(htim,
+
+			uint32_t captura_actual_1 = HAL_TIM_ReadCapturedValue(htim,
 			TIM_CHANNEL_1);
-			if (flag_ventana1) {
-				flag_ready1 = 1;
+
+			if (primera_captura_1) {
+				captura_anterior_1 = captura_actual_1;
+				primera_captura_1 = 0;
+				return; //sale del if si solo tengo una medicion y no puedo calcular delta
 			}
-			flag_ventana1 = (flag_ventana1 + 1) % 2;
+			delta_m1 = captura_actual_1 - captura_anterior_1;
+			captura_anterior_1 = captura_actual_1;
+			flag_sensado_m1 = 1;
+			tiempo_parado = 0;
 
 		} else {
-			t_ventana_2[flag_ventana2] = HAL_TIM_ReadCapturedValue(htim,
+			uint32_t captura_actual_2 = HAL_TIM_ReadCapturedValue(htim,
 			TIM_CHANNEL_2);
-			if (flag_ventana2) {
-				flag_ready2 = 1;
+			if (primera_captura_2) {
+				captura_anterior_2 = captura_actual_2;
+				primera_captura_2 = 0;
+				return; //sale del if si solo tengo una medicion y no puedo calcular delta
 			}
-			flag_ventana2 = (flag_ventana2 + 1) % 2;
-			;
+			delta_m2 = captura_actual_2 - captura_anterior_2;
+			captura_anterior_2 = captura_actual_2;
+			flag_sensado_m2 = 1;
 		}
 	}
+
 }
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	if (htim->Instance == TIM4) {
+
+		//Si no llegan pulsos en 1 segundo pone rpm en 0 (tengo que hacer esto para el otro motor)
+		if (!flag_sensado_m1) {
+			tiempo_parado++;
+		}
+		if (tiempo_parado == 100) {
+			rpm1 = 0;
+		}
+
+		PID(1, set_point, rpm1, &salida_pid, &ccr_actual);
+	}
+}
+
 /* USER CODE END 4 */
 
 /**
