@@ -72,7 +72,7 @@ void Mover_Motor(float duty_porcentaje, uint8_t motor, uint32_t *ccr_actual) {
 
 	uint32_t canal;
 	if (motor == 1) {
-		canal = TIM_CHANNEL_1;
+		canal = TIM_CHANNEL_3;
 	} else if (motor == 2) {
 		canal = TIM_CHANNEL_2;
 	} else {
