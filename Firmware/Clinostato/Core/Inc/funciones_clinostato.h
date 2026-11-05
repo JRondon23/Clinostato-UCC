@@ -9,11 +9,11 @@
 #define INC_FUNCIONES_CLINOSTATO_H_
 
 #define BUFFER_SIZE 60
-#define PULSOS_POR_VUELTA 60.0f //revisar porque da 60
+#define PULSOS_POR_VUELTA 30.0f //revisar porque da 60
 #define MAX_PWM 100
 #define TIEMPO_PID 0.01f
-#define PID_KP 8.0f//3.5f
-#define PID_KI 0.2f//1.0f
+#define PID_KP 4.0f//8.0f //con cuerpo 8.0 //3.5
+#define PID_KI 1.0f//0.8f // con cuerpo: 0.2 //1.0
 
 #include "stm32g4xx_hal.h"
 //frecuencia pwm = 200hz
